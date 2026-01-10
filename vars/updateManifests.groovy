@@ -3,7 +3,7 @@ def call(Map config = [:]) {
     def serviceName      = config.serviceName 
     def version          = config.version
     def dockerUser       = config.dockerUser ?: 'rupesh1997'
-    def gitCredentialsId = config.gitCredentialsId ?: 'git-creds'
+    def gitCredentialsId = config.gitCredentialsId ?: 'git-ssh-cred'
 
     // Derived variables
     def fullServiceName  = "fitverse-${serviceName}"
