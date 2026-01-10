@@ -1,52 +1,50 @@
 def call(Map config = [:]) {
-    // Dynamic parameters
     def serviceName      = config.serviceName 
     def version          = config.version
     def dockerUser       = config.dockerUser ?: 'rupesh1997'
-    def gitCredentialsId = config.gitCredentialsId ?: 'git-ssh-cred'
+    def gitCredentialsId = config.gitCredentialsId ?: 'git-ssh-cred' // This is your 'Username with password' ID
 
-    // Derived variables
     def fullServiceName  = "fitverse-${serviceName}"
     def imageName        = "${dockerUser}/${fullServiceName}:${version}"
     def k8sFilePath      = "kubernetes/${serviceName}-deployment.yaml"
 
-    echo "--- Dynamic CD Update: ${fullServiceName} to version ${version} ---"
+    echo "--- Dynamic CD Update: ${fullServiceName} using HTTPS Auth ---"
 
-    // Replacing sshagent with withCredentials
-    withCredentials([sshUserPrivateKey(credentialsId: gitCredentialsId, keyFileVariable: 'SSH_KEY')]) {
+    // Use usernamePassword instead of sshUserPrivateKey
+    withCredentials([usernamePassword(credentialsId: gitCredentialsId, usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
         
-        // 1. Setup Git Identity & SSH Command
-        // StrictHostKeyChecking=no avoids the "Host key verification failed" error
+        // 1. Git Setup
         sh """
             git config user.name "jenkins-cd-bot"
             git config user.email "jenkins-cd@alfarays.com"
-            chmod 600 ${SSH_KEY}
-            export GIT_SSH_COMMAND="ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no"
+            
+            # Reconfigure the remote to include the token for authentication
+            # This avoids the "Username for 'https://github.com':" prompt
+            git remote set-url origin https://${GIT_USER}:${GIT_TOKEN}@github.com/rupesh-hub/FitVerse-2026-01-01.git
         """
 
         // 2. Dynamic YAML Updates using yq
         sh """
-            # Update Docker Compose files
+            # Update Docker Compose
             find docker/docker-compose -name "docker-compose.yaml" | xargs -I {} \
                 yq -i '.services."${fullServiceName}".image = "${imageName}"' {}
 
-            # Update Kubernetes Deployment
+            # Update K8s
             if [ -f "${k8sFilePath}" ]; then
                 yq -i '(.spec.template.spec.containers[] | select(.name == "${fullServiceName}") | .image) = "${imageName}"' ${k8sFilePath}
             fi
 
-            # Update Helm Values
+            # Update Helm
             if [ -f "helm/values.yaml" ]; then
                 yq -i '.${serviceName}.image.tag = "${version}"' helm/values.yaml
             fi
         """
 
-        // 3. Robust Git Push
+        // 3. Push over HTTPS
         sh """
-            export GIT_SSH_COMMAND="ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no"
             git add .
             if git diff --staged --quiet; then
-                echo "No changes detected for ${fullServiceName}."
+                echo "No changes detected."
             else
                 git commit -m "chore(${serviceName}): deploy version ${version} [skip ci]"
                 git pull --rebase origin main
