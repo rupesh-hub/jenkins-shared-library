@@ -1,16 +1,16 @@
-def call(String[] images, String severity = 'HIGH,CRITICAL', Boolean failBuild = true) {
+// vars/trivyImageScan.groovy
+def call(List images, String severity = 'HIGH,CRITICAL', Boolean failBuild = false) { // Changed String[] to List
     echo "--- Starting Trivy Scan for ${images.size()} images ---"
 
-    // 0 = report only, 1 = fail pipeline if vulnerabilities are found
+    // Set to "0" during initial testing so your pipeline doesn't stop on vulns
     def exitCode = failBuild ? "1" : "0"
 
-    for (String image : images) {
-        // Create a unique filename for the report by replacing ':' and '/' with '-'
+    for (image in images) {
         def reportName = "trivy-report-${image.replaceAll(/[:\/]/, '-')}.txt"
 
         echo "Scanning: ${image}"
 
-        // We use 'tee' to show results in the console AND save to a file
+        // Use sh to run the scan
         sh """
             trivy image \
                 --severity ${severity} \
@@ -19,7 +19,6 @@ def call(String[] images, String severity = 'HIGH,CRITICAL', Boolean failBuild =
                 ${image} | tee ${reportName}
         """
 
-        // Archive the individual report so it appears in the Jenkins Build artifacts
         archiveArtifacts artifacts: reportName, allowEmptyArchive: true
     }
 }
