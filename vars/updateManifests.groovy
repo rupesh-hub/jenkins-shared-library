@@ -1,6 +1,6 @@
 def call(Map config = [:]) {
     // Dynamic parameters
-    def serviceName      = config.serviceName // 'backend' or 'frontend'
+    def serviceName      = config.serviceName 
     def version          = config.version
     def dockerUser       = config.dockerUser ?: 'rupesh1997'
     def gitCredentialsId = config.gitCredentialsId ?: 'git-creds'
@@ -12,25 +12,30 @@ def call(Map config = [:]) {
 
     echo "--- Dynamic CD Update: ${fullServiceName} to version ${version} ---"
 
-    sshagent([gitCredentialsId]) {
-        // 1. Git Setup
+    // Replacing sshagent with withCredentials
+    withCredentials([sshUserPrivateKey(credentialsId: gitCredentialsId, keyFileVariable: 'SSH_KEY')]) {
+        
+        // 1. Setup Git Identity & SSH Command
+        // StrictHostKeyChecking=no avoids the "Host key verification failed" error
         sh """
             git config user.name "jenkins-cd-bot"
             git config user.email "jenkins-cd@alfarays.com"
+            chmod 600 ${SSH_KEY}
+            export GIT_SSH_COMMAND="ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no"
         """
 
         // 2. Dynamic YAML Updates using yq
         sh """
-            # Update all Docker Compose variations dynamically based on serviceName
+            # Update Docker Compose files
             find docker/docker-compose -name "docker-compose.yaml" | xargs -I {} \
                 yq -i '.services."${fullServiceName}".image = "${imageName}"' {}
 
-            # Update Kubernetes Deployment (Select container by name)
+            # Update Kubernetes Deployment
             if [ -f "${k8sFilePath}" ]; then
                 yq -i '(.spec.template.spec.containers[] | select(.name == "${fullServiceName}") | .image) = "${imageName}"' ${k8sFilePath}
             fi
 
-            # Update Helm Values (Targets .backend.image.tag or .frontend.image.tag)
+            # Update Helm Values
             if [ -f "helm/values.yaml" ]; then
                 yq -i '.${serviceName}.image.tag = "${version}"' helm/values.yaml
             fi
@@ -38,6 +43,7 @@ def call(Map config = [:]) {
 
         // 3. Robust Git Push
         sh """
+            export GIT_SSH_COMMAND="ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no"
             git add .
             if git diff --staged --quiet; then
                 echo "No changes detected for ${fullServiceName}."
