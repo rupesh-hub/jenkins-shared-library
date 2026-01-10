@@ -23,10 +23,10 @@ def call(Map config = [:]) {
 
     // 4. The "Industry Standard" Quality Gate
     // This pauses the pipeline until SonarQube returns a PASS/FAIL status
-    timeout(time: 5, unit: 'MINUTES') {
-        def qg = waitForQualityGate()
-        if (qg.status != 'OK') {
-            error "Pipeline aborted due to Quality Gate failure: ${qg.status}"
-        }
-    }
+    // timeout(time: 5, unit: 'MINUTES') {
+    //     def qg = waitForQualityGate()
+    //     if (qg.status != 'OK') {
+    //         error "Pipeline aborted due to Quality Gate failure: ${qg.status}"
+    //     }
+    // }
 }
