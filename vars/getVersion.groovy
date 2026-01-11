@@ -1,4 +1,4 @@
-def call(String projectPath = 'frontend') {
+def call(String projectPath) {
     dir(projectPath) {
         if (fileExists('package.json')) {
             // Extract version from package.json using jq

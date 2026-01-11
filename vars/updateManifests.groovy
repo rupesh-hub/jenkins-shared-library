@@ -1,48 +1,45 @@
 def call(Map config = [:]) {
-    def serviceName      = config.serviceName 
-    def version          = config.version
-    def dockerUser       = config.dockerUser ?: 'rupesh1997'
     def gitCredentialsId = config.gitCredentialsId ?: 'git-ssh-cred'
+    // services is a list of maps: [[dockerName: 'fitverse-backend', helmName: 'backend', tag: '1.0.1']]
+    def services = config.services ?: []
 
-    def fullServiceName  = "fitverse-${serviceName}"
-    def imageName        = "${dockerUser}/${fullServiceName}:${version}"
-    def k8sFilePath      = "kubernetes/${serviceName}-deployment.yaml"
-
-    echo "--- Updating Manifests for ${fullServiceName} ---"
+    echo "--- Updating Manifests for ${services.size()} services ---"
 
     withCredentials([usernamePassword(credentialsId: gitCredentialsId, usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
-        
-        sh '''
+        sh """
             git config user.name "jenkins-cd-bot"
             git config user.email "jenkins-cd@alfarays.com"
-            git remote set-url origin "https://${GIT_USER}:${GIT_TOKEN}@github.com/rupesh-hub/FitVerse-2026-01-01.git"
-
-            # --- Update YAML Files ---
             
-            # Use 'select' to only update if the service exists. This prevents creating the '""' key.
-            # We also target ONLY the production folder to be safe.
-            find docker/docker-compose/production -name "docker-compose.yaml" | xargs -I {} \
-                yq -i 'with(.services."''' + fullServiceName + '''"; select(.) .image = "''' + imageName + '''")' {}
+            ORIGIN_URL=\$(git config --get remote.origin.url | sed 's|https://||')
+            git remote set-url origin "https://${GIT_USER}:${GIT_TOKEN}@\$ORIGIN_URL"
 
-            # Kubernetes update
-            if [ -f "''' + k8sFilePath + '''" ]; then
-                yq -i '(.spec.template.spec.containers[] | select(.name == "''' + fullServiceName + '''") | .image) = "''' + imageName + '''"' ''' + k8sFilePath + '''
-            fi
+            ${services.collect { svc -> 
+                """
+                echo "Processing ${svc.dockerName} (Helm: ${svc.helmName}) -> Tag: ${svc.tag}"
 
-            # Helm update
-            if [ -f "helm/values.yaml" ]; then
-                yq -i ".''' + serviceName + '''.image.tag = \\"''' + version + '''\\"" helm/values.yaml
-            fi
+                # 1. Update ALL docker-compose files (using dockerName)
+                find . -name "docker-compose*.yaml" -o -name "docker-compose*.yml" | xargs -I {} sh -c '
+                    if yq ".services.\\"${svc.dockerName}\\"" {} | grep -qv "null"; then
+                        yq -i ".services.\\"${svc.dockerName}\\".image |= sub(\\":.*\\", \\":${svc.tag}\\")" {}
+                    fi
+                '
 
-            # --- Commit and Push ---
+                # 2. Update Helm values (using helmName)
+                if [ -f "helm/values.yaml" ]; then
+                    if yq ".${svc.helmName}" helm/values.yaml | grep -qv "null"; then
+                         yq -i ".${svc.helmName}.image.tag = \\"${svc.tag}\\"" helm/values.yaml
+                    fi
+                fi
+                """
+            }.join('\n')}
+
             git add .
             if git diff --staged --quiet; then
                 echo "No changes to commit."
             else
-                git commit -m "chore(''' + serviceName + '''): deploy version ''' + version + ''' [skip ci]"
-                git fetch origin main
+                git commit -m "chore(ops): deployment update for ${services.collect{it.helmName}.join(', ')} [skip ci]"
                 git push origin HEAD:main
             fi
-        '''
+        """
     }
 }
